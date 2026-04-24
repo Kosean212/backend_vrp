@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -9,22 +9,29 @@ from app.schemas import LoteCreate, LoteOut
 router = APIRouter(prefix="/biochar", tags=["Producción Biochar"])
 
 
-@router.post("/lotes", response_model=LoteOut, status_code=201)
+@router.post("/lotes", response_model=LoteOut, status_code=status.HTTP_201_CREATED)
 def registrar_lote(datos: LoteCreate, db: Session = Depends(get_db)):
-    """Registra un lote de producción de biochar vinculado a una recolección."""
+    """
+    Registra un lote de producción de biochar vinculado a una recolección.
+    Si no se provee eficiencia_real, se calcula automáticamente.
+    """
     recoleccion = db.query(Recoleccion).filter(
         Recoleccion.id_recoleccion == datos.id_recoleccion
     ).first()
     if not recoleccion:
-        raise HTTPException(status_code=404, detail="Recolección no encontrada")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Recolección {datos.id_recoleccion} no encontrada",
+        )
 
-    # Calcular eficiencia real si no se proporciona
-    if datos.eficiencia_real is None and recoleccion.peso_captado_kg:
-        eficiencia = (float(datos.biochar_obtenido_kg) / float(recoleccion.peso_captado_kg)) * 100
-        datos_dict = datos.model_dump()
-        datos_dict["eficiencia_real"] = round(eficiencia, 2)
-    else:
-        datos_dict = datos.model_dump()
+    datos_dict = datos.model_dump()
+
+    if datos_dict["eficiencia_real"] is None and recoleccion.peso_captado_kg:
+        peso_base = float(recoleccion.peso_captado_kg)
+        if peso_base > 0:
+            datos_dict["eficiencia_real"] = round(
+                (float(datos.biochar_obtenido_kg) / peso_base) * 100, 2
+            )
 
     lote = LoteProduccion(**datos_dict)
     db.add(lote)
@@ -42,5 +49,8 @@ def listar_lotes(db: Session = Depends(get_db)):
 def obtener_lote(id_lote: int, db: Session = Depends(get_db)):
     lote = db.query(LoteProduccion).filter(LoteProduccion.id_lote == id_lote).first()
     if not lote:
-        raise HTTPException(status_code=404, detail="Lote no encontrado")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lote no encontrado",
+        )
     return lote

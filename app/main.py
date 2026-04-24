@@ -1,34 +1,52 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 
 from app.database import engine, Base
 
-# Importar todos los modelos para que SQLAlchemy los registre
-import app.models.unidad
-import app.models.punto
-import app.models.ruta
-import app.models.biochar
+# Registrar todos los modelos antes de create_all
+import app.models.unidad   # noqa: F401
+import app.models.punto    # noqa: F401
+import app.models.ruta     # noqa: F401
+import app.models.biochar  # noqa: F401
 
-# Importar routers
 from app.routes import unidades, puntos, vrp, recolecciones, biochar, reportes
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Crea tablas al iniciar; libera recursos al cerrar."""
+    logger.info("Iniciando API Biochar — creando tablas si no existen...")
+    Base.metadata.create_all(bind=engine)
+    yield
+    logger.info("API Biochar apagándose.")
+
+
 app = FastAPI(
-    title="API Biochar - Optimización de Rutas",
-    description="Sistema de gestión de recolección de residuos orgánicos y producción de biochar",
-    version="1.0.0",
+    title="API Biochar — Optimización de Rutas",
+    description=(
+        "Sistema de gestión de recolección de residuos orgánicos "
+        "y producción de biochar para Teziutlán, Puebla."
+    ),
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
-# ─── CORS ────────────────────────────────────────────────────────────────────
-# IMPORTANTE: el middleware debe registrarse ANTES de incluir los routers
+# ─── CORS ─────────────────────────────────────────────────────────────────────
+# En producción: reemplaza "*" con el dominio real del frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # En producción reemplaza con tu dominio frontend
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ─── ROUTERS ─────────────────────────────────────────────────────────────────
+# ─── ROUTERS ──────────────────────────────────────────────────────────────────
 app.include_router(unidades.router)
 app.include_router(puntos.router)
 app.include_router(vrp.router)
@@ -36,10 +54,18 @@ app.include_router(recolecciones.router)
 app.include_router(biochar.router)
 app.include_router(reportes.router)
 
-# ─── CREAR TABLAS ────────────────────────────────────────────────────────────
-Base.metadata.create_all(bind=engine)
-
 
 @app.get("/", tags=["Root"])
 def root():
-    return {"mensaje": "API Biochar funcionando 🚀", "docs": "/docs"}
+    return {
+        "mensaje": "API Biochar funcionando 🚀",
+        "version": "2.0.0",
+        "docs":    "/docs",
+        "redoc":   "/redoc",
+    }
+
+
+@app.get("/health", tags=["Root"])
+def health():
+    """Health-check para load balancers / Docker."""
+    return {"status": "ok"}
